@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Grashy Studio</string>
+    <string name="mode_form">Form Generator</string>
+    <string name="mode_visual">Visual Editor</string>
+    <string name="mode_form_short">Form</string>
+    <string name="mode_visual_short">Visual</string>
+    <string name="doc_generator_title">Document Generator</string>
+    <string name="doc_generator_subtitle">Fill client &amp; event fields — preview updates live</string>
+    <string name="new_client">New Client</string>
+    <string name="generate_document">Generate Document</string>
+    <string name="edit_visually">Edit Visually</string>
+    <string name="quick_quote_title">Quick Quote Auto-Fill (WhatsApp / Notes)</string>
+    <string name="load_sample">Load Sample</string>
+    <string name="clean_bullets">Clean Bullets</string>
+    <string name="export_pdf">Export PDF</string>
+    <string name="export_docx">Export DOCX</string>
+    <string name="import_file">Import</string>
+    <string name="save_project">Save</string>
+    <string name="sync_center_title">Workspace Storage, Versions &amp; Cloud Sync</string>
+    <string name="apply_redesign">Apply Professional Redesign</string>
+    <string name="revert_original">Revert to Original PDF Layout</string>
+</resources>
