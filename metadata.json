@@ -1,0 +1,6 @@
+{
+  "name": "Grashy Studio — Professional Letterhead Editor",
+  "description": "Precision A4 letterhead layout, typography, smart quotation formatting, and PDF/DOCX publishing studio built around the Grashy Caterers brand identity.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
