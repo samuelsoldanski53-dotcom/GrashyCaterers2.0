@@ -32,6 +32,7 @@ import kotlinx.serialization.json.put
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 class SupabaseSyncClient(private val repository: WorkspaceRepository) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -139,8 +140,10 @@ class SupabaseSyncClient(private val repository: WorkspaceRepository) {
                     if (rec.syncStatus == RecordSyncStatus.CONFLICT) continue
 
                     val cloudDocId = SyncEngine.toCloudId(userId, rec.id)
+                    val encodedDocId = URLEncoder.encode(cloudDocId, "UTF-8")
+                    val encodedUserId = URLEncoder.encode(userId, "UTF-8")
                     val remoteRows = httpRequest(
-                        "$supabaseUrl/rest/v1/documents?id=eq.$cloudDocId&user_id=eq.$userId&select=*",
+                        "$supabaseUrl/rest/v1/documents?id=eq.$encodedDocId&user_id=eq.$encodedUserId&select=*",
                         "GET",
                         null,
                         accessToken
@@ -190,7 +193,8 @@ class SupabaseSyncClient(private val repository: WorkspaceRepository) {
         }
 
         // Pull updates from Supabase
-        val remoteDocsRaw = httpRequest("$supabaseUrl/rest/v1/documents?user_id=eq.$userId&select=*", "GET", null, accessToken)
+        val encodedUserIdForPull = URLEncoder.encode(userId, "UTF-8")
+        val remoteDocsRaw = httpRequest("$supabaseUrl/rest/v1/documents?user_id=eq.$encodedUserIdForPull&select=*", "GET", null, accessToken)
         val remoteDocs = json.parseToJsonElement(remoteDocsRaw).jsonArray
         for (el in remoteDocs) {
             val rd = el.jsonObject
@@ -366,15 +370,19 @@ class SupabaseSyncClient(private val repository: WorkspaceRepository) {
                 doOutput = true
             }
         }
-        if (body != null) {
-            OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(body) }
+        try {
+            if (body != null) {
+                OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(body) }
+            }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val text = stream?.bufferedReader()?.use { it.readText() } ?: ""
+            if (code !in 200..299) {
+                error("Cloud error ($code): $text")
+            }
+            return text
+        } finally {
+            conn.disconnect()
         }
-        val code = conn.responseCode
-        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-        val text = stream?.bufferedReader()?.use { it.readText() } ?: ""
-        if (code !in 200..299) {
-            error("Cloud error ($code): $text")
-        }
-        return text
     }
 }

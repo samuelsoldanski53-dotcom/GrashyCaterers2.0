@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.AlignHorizontalLeft
+import androidx.compose.material.icons.automirrored.filled.AlignHorizontalRight
 import androidx.compose.material.icons.filled.AlignHorizontalCenter
 import androidx.compose.material.icons.filled.AlignHorizontalLeft
 import androidx.compose.material.icons.filled.AlignHorizontalRight
@@ -379,13 +381,13 @@ private fun FormatTab(
         Text("ALIGN TO MARGINS / PAGE", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onClick = { onAlignSelected(Geometry.AlignmentTarget.LEFT) }) {
-                Icon(Icons.Default.AlignHorizontalLeft, contentDescription = "Align Left")
+                Icon(Icons.AutoMirrored.Filled.AlignHorizontalLeft, contentDescription = "Align Left")
             }
             IconButton(onClick = { onAlignSelected(Geometry.AlignmentTarget.CENTER_X) }) {
                 Icon(Icons.Default.AlignHorizontalCenter, contentDescription = "Center Horizontally")
             }
             IconButton(onClick = { onAlignSelected(Geometry.AlignmentTarget.RIGHT) }) {
-                Icon(Icons.Default.AlignHorizontalRight, contentDescription = "Align Right")
+                Icon(Icons.AutoMirrored.Filled.AlignHorizontalRight, contentDescription = "Align Right")
             }
             IconButton(onClick = { onAlignSelected(Geometry.AlignmentTarget.TOP) }) {
                 Icon(Icons.Default.AlignVerticalTop, contentDescription = "Align Top")

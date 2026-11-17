@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudSync
@@ -284,7 +285,7 @@ fun WorkspaceSyncModal(
                                         Text(syncStatus.userEmail ?: "", style = MaterialTheme.typography.titleSmall, color = StudioColors.TextPrimary)
                                     }
                                     OutlinedButton(onClick = onSignOut, modifier = Modifier.defaultMinSize(minHeight = 44.dp)) {
-                                        Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text("Sign Out", fontSize = 12.sp)
                                     }

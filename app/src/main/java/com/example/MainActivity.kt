@@ -40,7 +40,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -87,6 +91,7 @@ fun GrashyStudioApp(viewModel: StudioViewModel = viewModel()) {
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
     var showLayersSheet by remember { mutableStateOf(false) }
     var showInspectorSheet by remember { mutableStateOf(false) }
     var replacingImageElementId by remember { mutableStateOf<String?>(null) }
@@ -96,20 +101,26 @@ fun GrashyStudioApp(viewModel: StudioViewModel = viewModel()) {
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            runCatching { DocumentExporter.copyUriToInternalImageFile(context, uri) }
-                .onSuccess { localUriStr ->
-                    val replaceTarget = replacingImageElementId
-                    if (replaceTarget != null) {
-                        viewModel.replaceElementImage(replaceTarget, localUriStr)
-                    } else {
-                        viewModel.addImportedImage(localUriStr, "Photo Asset")
+            val replaceTarget = replacingImageElementId
+            coroutineScope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        DocumentExporter.copyUriToInternalImageFile(context, uri)
                     }
-                    replacingImageElementId = null
-                    showLayersSheet = false
                 }
-                .onFailure { err ->
-                    viewModel.showNotice(err.message ?: "Failed to load selected photo.")
-                }
+                    .onSuccess { localUriStr ->
+                        if (replaceTarget != null) {
+                            viewModel.replaceElementImage(replaceTarget, localUriStr)
+                        } else {
+                            viewModel.addImportedImage(localUriStr, "Photo Asset")
+                        }
+                        replacingImageElementId = null
+                        showLayersSheet = false
+                    }
+                    .onFailure { err ->
+                        viewModel.showNotice(err.message ?: "Failed to load selected photo.")
+                    }
+            }
         }
     }
 

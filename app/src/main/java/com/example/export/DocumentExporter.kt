@@ -73,8 +73,14 @@ object DocumentExporter {
     }
 
     fun copyUriToInternalImageFile(context: Context, uri: Uri): String {
-        val ext = context.contentResolver.getType(uri)?.substringAfter('/') ?: "png"
-        val outFile = File(importedAssetsDir(context), "img_${System.currentTimeMillis()}.$ext")
+        val rawExt = context.contentResolver.getType(uri)
+            ?.substringAfter('/')
+            ?.substringBefore(';')
+            ?.substringBefore('+')
+            ?.lowercase()
+            ?.replace(Regex("[^a-z0-9]"), "")
+            ?.takeIf { it.isNotBlank() } ?: "png"
+        val outFile = File(importedAssetsDir(context), "img_${System.currentTimeMillis()}.$rawExt")
         context.contentResolver.openInputStream(uri)?.use { input ->
             FileOutputStream(outFile).use { output -> input.copyTo(output) }
         } ?: error("Unable to read selected image.")
@@ -123,9 +129,11 @@ object DocumentExporter {
         val pageH = (Geometry.A4_HEIGHT_MM * mmToPx).roundToInt() // ~1684
 
         val pdf = PdfDocument()
-        for (pageIdx in 0 until project.pageCount) {
+        try {
+            for (pageIdx in 0 until project.pageCount) {
             val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, pageIdx + 1).create()
             val page = pdf.startPage(pageInfo)
+            try {
             val canvas: Canvas = page.canvas
             canvas.drawColor(android.graphics.Color.WHITE)
 
@@ -261,16 +269,20 @@ object DocumentExporter {
                 }
                 canvas.restore()
             }
-            pdf.finishPage(page)
+            } finally {
+                pdf.finishPage(page)
+            }
         }
 
-        val fileName = "${slugify(project.name)}.pdf"
-        val outFile = File(exportsDir(context), fileName)
-        FileOutputStream(outFile).use { pdf.writeTo(it) }
-        pdf.close()
+            val fileName = "${slugify(project.name)}.pdf"
+            val outFile = File(exportsDir(context), fileName)
+            FileOutputStream(outFile).use { pdf.writeTo(it) }
 
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", outFile)
-        ExportFileResult(uri, fileName, "application/pdf")
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", outFile)
+            ExportFileResult(uri, fileName, "application/pdf")
+        } finally {
+            runCatching { pdf.close() }
+        }
     }
 
     private fun xmlEscape(text: String): String {
@@ -842,28 +854,33 @@ object DocumentExporter {
         // 4. PDF import via Android PdfRenderer
         if (ext == "pdf" || mime == "application/pdf") {
             val tmpPdf = File(exportsDir(context), "import_${System.currentTimeMillis()}.pdf")
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(tmpPdf).use { output -> input.copyTo(output) }
-            } ?: error("Could not read PDF file.")
-
-            val pfd = ParcelFileDescriptor.open(tmpPdf, ParcelFileDescriptor.MODE_READ_ONLY)
-            val renderer = PdfRenderer(pfd)
-            if (renderer.pageCount == 0) {
-                renderer.close()
-                pfd.close()
-                error("PDF has no pages.")
-            }
-            val page = renderer.openPage(0)
-            val bmp = Bitmap.createBitmap(page.width * 2, page.height * 2, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bmp)
-            canvas.drawColor(android.graphics.Color.WHITE)
-            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            page.close()
-            renderer.close()
-            pfd.close()
-
             val outImg = File(importedAssetsDir(context), "pdf_page_${System.currentTimeMillis()}.png")
-            FileOutputStream(outImg).use { bmp.compress(Bitmap.CompressFormat.PNG, 95, it) }
+            try {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(tmpPdf).use { output -> input.copyTo(output) }
+                } ?: error("Could not read PDF file.")
+
+                val bmp = ParcelFileDescriptor.open(tmpPdf, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                    PdfRenderer(pfd).use { renderer ->
+                        if (renderer.pageCount == 0) error("PDF has no pages.")
+                        renderer.openPage(0).use { page ->
+                            Bitmap.createBitmap(page.width * 2, page.height * 2, Bitmap.Config.ARGB_8888).also { bitmap ->
+                                val canvas = Canvas(bitmap)
+                                canvas.drawColor(android.graphics.Color.WHITE)
+                                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            }
+                        }
+                    }
+                }
+
+                try {
+                    FileOutputStream(outImg).use { bmp.compress(Bitmap.CompressFormat.PNG, 95, it) }
+                } finally {
+                    bmp.recycle()
+                }
+            } finally {
+                tmpPdf.delete()
+            }
 
             val el = LetterheadElement(
                 id = "pdf-page-${System.currentTimeMillis()}",
