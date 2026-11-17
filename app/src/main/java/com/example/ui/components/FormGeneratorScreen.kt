@@ -22,12 +22,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoFixHigh
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -38,6 +39,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,6 +55,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.domain.FormSync
 import com.example.domain.QuoteParser
 import com.example.model.LetterheadFormData
 import com.example.ui.theme.StudioColors
@@ -69,6 +73,7 @@ fun FormGeneratorPanel(
     onStartNewClient: () -> Unit,
     onSwitchToVisual: () -> Unit,
     onShowPreviewCompact: () -> Unit,
+    onSavePermanentAddress: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var quickPasteOpen by remember { mutableStateOf(false) }
@@ -283,7 +288,14 @@ fun FormGeneratorPanel(
             }
             OutlinedTextField(
                 value = formData.eventDetails,
-                onValueChange = { v -> onUpdateField({ it.copy(eventDetails = v) }, null) },
+                onValueChange = { v ->
+                    val updated = if (v.length > formData.eventDetails.length && v.endsWith("\n")) {
+                        "$v•  "
+                    } else {
+                        v
+                    }
+                    onUpdateField({ it.copy(eventDetails = updated) }, null)
+                },
                 minLines = 6,
                 maxLines = 12,
                 colors = OutlinedTextFieldDefaults.colors(
@@ -295,38 +307,75 @@ fun FormGeneratorPanel(
                     .testTag("form_event_details_input")
             )
 
+            // Supervisor Toggle: Show/Hide Quantity & Price on Menu
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = StudioColors.SurfaceMuted,
+                border = BorderStroke(1.dp, StudioColors.Border)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Show Quantity & Price on Menu",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = StudioColors.TextPrimary
+                        )
+                        Text(
+                            text = "Supervisor option: hide per-plate prices/quantities on client menu",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = StudioColors.TextMuted
+                        )
+                    }
+                    Switch(
+                        checked = formData.showMenuQuantityAndPrice,
+                        onCheckedChange = { checked ->
+                            onUpdateField({ it.copy(showMenuQuantityAndPrice = checked) }, null)
+                        },
+                        colors = SwitchDefaults.colors(checkedTrackColor = StudioColors.BrandAccent),
+                        modifier = Modifier.testTag("supervisor_qty_price_switch")
+                    )
+                }
+            }
+
             HorizontalDivider(color = StudioColors.Border)
 
             // Section B: Payment Information
-            SectionHeader(letter = "B", title = "Payment Information")
+            SectionHeader(letter = "B", title = "Payment Information (Kenya 16% VAT)")
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StudioTextField(
                     label = "Transport Cost",
                     value = formData.transportCost,
-                    onValueChange = { v -> onUpdateField({ it.copy(transportCost = v) }, null) },
+                    onValueChange = { v -> onUpdateField({ it.copy(transportCost = FormSync.formatNumericInput(v)) }, null) },
                     modifier = Modifier.weight(1f),
                     testTag = "form_transport_input"
                 )
                 StudioTextField(
                     label = "Subtotal (Excl. VAT)",
                     value = formData.subtotalCost,
-                    onValueChange = { v -> onUpdateField({ it.copy(subtotalCost = v) }, "subtotalCost") },
+                    onValueChange = { v -> onUpdateField({ it.copy(subtotalCost = FormSync.formatNumericInput(v)) }, "subtotalCost") },
                     modifier = Modifier.weight(1f),
                     testTag = "form_subtotal_input"
                 )
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StudioTextField(
-                    label = "VAT Amount",
+                    label = "VAT (16% Kenya)",
                     value = formData.vatAmount,
-                    onValueChange = { v -> onUpdateField({ it.copy(vatAmount = v) }, "vatAmount") },
+                    onValueChange = { v -> onUpdateField({ it.copy(vatAmount = FormSync.formatNumericInput(v)) }, "vatAmount") },
                     modifier = Modifier.weight(1f),
                     testTag = "form_vat_input"
                 )
                 StudioTextField(
                     label = "Total Amount",
                     value = formData.totalAmount,
-                    onValueChange = { v -> onUpdateField({ it.copy(totalAmount = v) }, "totalAmount") },
+                    onValueChange = { v -> onUpdateField({ it.copy(totalAmount = FormSync.formatNumericInput(v)) }, "totalAmount") },
                     modifier = Modifier.weight(1f),
                     testTag = "form_total_input"
                 )
@@ -335,14 +384,14 @@ fun FormGeneratorPanel(
                 StudioTextField(
                     label = "Deposit Amount",
                     value = formData.depositAmount,
-                    onValueChange = { v -> onUpdateField({ it.copy(depositAmount = v) }, "depositAmount") },
+                    onValueChange = { v -> onUpdateField({ it.copy(depositAmount = FormSync.formatNumericInput(v)) }, "depositAmount") },
                     modifier = Modifier.weight(1f),
                     testTag = "form_deposit_input"
                 )
                 StudioTextField(
                     label = "Balance Due",
                     value = formData.balance,
-                    onValueChange = { v -> onUpdateField({ it.copy(balance = v) }, null) },
+                    onValueChange = { v -> onUpdateField({ it.copy(balance = FormSync.formatNumericInput(v)) }, null) },
                     modifier = Modifier.weight(1f),
                     testTag = "form_balance_input"
                 )
@@ -426,6 +475,18 @@ fun FormGeneratorPanel(
                 onValueChange = { v -> onUpdateField({ it.copy(postalAddress = v) }, null) },
                 testTag = "form_postal_address_input"
             )
+            OutlinedButton(
+                onClick = { onSavePermanentAddress(formData.physicalAddress, formData.postalAddress) },
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
+                    .testTag("save_permanent_address_button")
+            ) {
+                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Set / Update Permanent Address", fontSize = 12.sp)
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
         }
@@ -450,14 +511,16 @@ fun FormGeneratorPanel(
                     containerColor = if (justGenerated) StudioColors.SuccessText else StudioColors.BrandAccent
                 ),
                 shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 modifier = Modifier
-                    .weight(1f)
-                    .defaultMinSize(minHeight = 48.dp)
+                    .defaultMinSize(minWidth = 56.dp, minHeight = 48.dp)
                     .testTag("generate_document_button")
             ) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(if (justGenerated) "Saved!" else "Generate", fontSize = 13.sp)
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "Generate Document",
+                    modifier = Modifier.size(22.dp)
+                )
             }
 
             if (isCompactLayout) {

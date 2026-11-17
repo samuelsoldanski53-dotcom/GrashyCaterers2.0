@@ -32,6 +32,8 @@ class WorkspaceRepository(private val db: GrashyDatabase) {
         const val META_CLOUD_SESSION_EMAIL = "cloudSessionEmail"
         const val META_CLOUD_SESSION_USER_ID = "cloudSessionUserId"
         const val META_CLOUD_ACCESS_TOKEN = "cloudAccessToken"
+        const val META_PERMANENT_PHYSICAL_ADDRESS = "permanentPhysicalAddress"
+        const val META_PERMANENT_POSTAL_ADDRESS = "permanentPostalAddress"
     }
 
     val documentsFlow: Flow<List<LocalDocumentRecord>> = db.documentDao().observeActiveDocuments()
@@ -352,6 +354,17 @@ class WorkspaceRepository(private val db: GrashyDatabase) {
         val email = db.metaDao().getValue(META_CLOUD_SESSION_EMAIL).orEmpty()
         val token = db.metaDao().getValue(META_CLOUD_ACCESS_TOKEN).orEmpty()
         return if (uid.isNotEmpty() && token.isNotEmpty()) Triple(uid, email, token) else null
+    }
+
+    suspend fun savePermanentAddress(physicalAddress: String, postalAddress: String) {
+        db.metaDao().put(MetaEntity(META_PERMANENT_PHYSICAL_ADDRESS, physicalAddress.trim()))
+        db.metaDao().put(MetaEntity(META_PERMANENT_POSTAL_ADDRESS, postalAddress.trim()))
+    }
+
+    suspend fun getPermanentAddress(): Pair<String?, String?> {
+        val physical = db.metaDao().getValue(META_PERMANENT_PHYSICAL_ADDRESS)?.takeIf { it.isNotBlank() }
+        val postal = db.metaDao().getValue(META_PERMANENT_POSTAL_ADDRESS)?.takeIf { it.isNotBlank() }
+        return physical to postal
     }
 
     suspend fun getAllQueueItems(): List<SyncQueueItem> {

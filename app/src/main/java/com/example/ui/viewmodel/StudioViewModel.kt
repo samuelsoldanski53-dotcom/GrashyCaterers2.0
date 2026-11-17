@@ -41,6 +41,7 @@ import com.example.model.SnapGuide
 import com.example.model.SyncStatusSnapshot
 import com.example.model.TextAlignOption
 import com.example.model.TextStyleConfig
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -50,6 +51,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -120,8 +122,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    @OptIn(FlowPreview::class)
     val suggestions: StateFlow<List<DesignSuggestion>> = _uiState
-        .map { DesignAnalyzer.analyzeLetterheadDesign(it.project) }
+        .map { it.project }
+        .debounce(350)
+        .map { DesignAnalyzer.analyzeLetterheadDesign(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val activeDocumentRecord: StateFlow<LocalDocumentRecord?> = combine(
@@ -180,9 +185,22 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             }
             val initial = GrashyInitialProject.createRedesignedGrashyProject()
             val activeDoc = repository.ensureLocalDatabaseSeeded(initial)
+            val (permPhysical, permPostal) = repository.getPermanentAddress()
+            val hydratedProject = if (permPhysical != null || permPostal != null) {
+                val updatedForm = activeDoc.project.formData.copy(
+                    physicalAddress = permPhysical ?: activeDoc.project.formData.physicalAddress,
+                    postalAddress = permPostal ?: activeDoc.project.formData.postalAddress
+                )
+                activeDoc.project.copy(
+                    formData = updatedForm,
+                    elements = FormSync.syncFormToElements(activeDoc.project.elements, updatedForm)
+                )
+            } else {
+                activeDoc.project
+            }
             _uiState.update {
                 it.copy(
-                    history = HistoryManager.loadDocument(activeDoc.project),
+                    history = HistoryManager.loadDocument(hydratedProject),
                     isInitialized = true
                 )
             }
@@ -224,8 +242,15 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         if (!_uiState.value.isInitialized) return
         autoSaveJob?.cancel()
         autoSaveJob = viewModelScope.launch {
-            delay(450)
+            delay(800)
             repository.saveLocalDocumentWorkingCopy(_uiState.value.project, recordVersion = false)
+        }
+    }
+
+    fun savePermanentAddress(physicalAddress: String, postalAddress: String) {
+        viewModelScope.launch {
+            repository.savePermanentAddress(physicalAddress, postalAddress)
+            showNotice("Permanent sender address saved.")
         }
     }
 
@@ -301,6 +326,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { state ->
             val nextHistory = HistoryManager.liveUpdate(state.history, captureCheckpoint = true) { prev ->
                 var nextForm = transform(prev.formData)
+                if (recalcFrom == "subtotalCost") {
+                    val computedVat = FormSync.computeKenyaVatFromSubtotal(nextForm.subtotalCost)
+                    if (computedVat != null) nextForm = nextForm.copy(vatAmount = computedVat)
+                }
                 if (recalcFrom == "subtotalCost" || recalcFrom == "vatAmount") {
                     val computed = FormSync.computeTotalFromBreakdown(nextForm.subtotalCost, nextForm.vatAmount, nextForm.totalAmount)
                     if (computed != null) nextForm = nextForm.copy(totalAmount = computed)

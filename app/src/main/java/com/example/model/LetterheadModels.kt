@@ -46,6 +46,7 @@ data class LetterheadFormData(
     val pax: String = "",
     val venue: String = "",
     val eventDetails: String = "",
+    val showMenuQuantityAndPrice: Boolean = true,
     // B. Payment Information
     val transportCost: String = "",
     val subtotalCost: String = "",

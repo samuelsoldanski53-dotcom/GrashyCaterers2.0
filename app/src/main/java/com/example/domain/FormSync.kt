@@ -11,6 +11,8 @@ import kotlin.math.max
 import kotlin.math.roundToLong
 
 object FormSync {
+    const val KENYA_VAT_RATE = 0.16
+
     val DEFAULT_FORM_DATA = LetterheadFormData(
         date = "13/11/2026",
         clientName = "Sunculture Kenya Ltd",
@@ -76,6 +78,38 @@ object FormSync {
         return "${if (hasKes) "KES " else ""}$formatted${if (hasSlashEq) "/=" else ""}"
     }
 
+    fun formatNumericInput(raw: String): String {
+        if (raw.isBlank()) return raw
+        val hasKes = Regex("^\\s*kes\\s*", RegexOption.IGNORE_CASE).containsMatchIn(raw)
+        val hasSlashEq = raw.trimEnd().endsWith("/=")
+        val stripped = raw
+            .replace(Regex("kes", RegexOption.IGNORE_CASE), "")
+            .replace("/=", "")
+            .replace(",", "")
+            .replace(" ", "")
+        if (stripped.isEmpty()) return raw
+
+        val dotIdx = stripped.indexOf('.')
+        val intPartRaw = if (dotIdx >= 0) stripped.substring(0, dotIdx) else stripped
+        val decPartRaw = if (dotIdx >= 0) stripped.substring(dotIdx + 1).replace(Regex("[^0-9]"), "") else null
+        val digitsOnly = intPartRaw.replace(Regex("[^0-9]"), "")
+        if (digitsOnly.isEmpty() && decPartRaw == null) return raw
+
+        val formattedInt = if (digitsOnly.isEmpty()) {
+            "0"
+        } else {
+            digitsOnly.reversed().chunked(3).joinToString(",").reversed()
+        }
+        val numStr = if (decPartRaw != null) "$formattedInt.$decPartRaw" else formattedInt
+        return "${if (hasKes) "KES " else ""}$numStr${if (hasSlashEq) "/=" else ""}"
+    }
+
+    fun computeKenyaVatFromSubtotal(subtotalRaw: String): String? {
+        val subtotal = parseNumericAmount(subtotalRaw) ?: return null
+        val vat = subtotal * KENYA_VAT_RATE
+        return formatAmountLike(vat, subtotalRaw)
+    }
+
     fun computeBalanceFromAmounts(totalRaw: String, depositRaw: String): String? {
         val total = parseNumericAmount(totalRaw) ?: return null
         val deposit = parseNumericAmount(depositRaw) ?: return null
@@ -91,6 +125,38 @@ object FormSync {
         val subtotal = parseNumericAmount(subtotalRaw) ?: return null
         val vat = parseNumericAmount(vatRaw) ?: 0.0
         return formatAmountLike(subtotal + vat, totalTemplate, subtotalRaw, vatRaw)
+    }
+
+    fun autoBulletMenuText(raw: String): String {
+        val lines = raw.split("\n")
+        return lines.mapIndexed { idx, line ->
+            val trimmed = line.trim()
+            when {
+                trimmed.isEmpty() -> ""
+                idx == 0 && trimmed.equals("MENU SELECTION", ignoreCase = true) -> trimmed
+                trimmed.endsWith(":") && trimmed.length <= 40 -> trimmed
+                trimmed.startsWith("•") -> "•  ${trimmed.removePrefix("•").trim()}"
+                trimmed.startsWith("-") || trimmed.startsWith("*") || trimmed.startsWith("💫") ->
+                    "•  ${trimmed.replace(Regex("^[-*💫]+\\s*"), "")}"
+                else -> "•  $trimmed"
+            }
+        }.joinToString("\n")
+    }
+
+    fun formatMenuForDocument(raw: String, showQtyAndPrice: Boolean): String {
+        val bulleted = autoBulletMenuText(raw)
+        if (showQtyAndPrice) return bulleted
+        return bulleted.split("\n").joinToString("\n") { line ->
+            if (line.isBlank() || line.trim().equals("MENU SELECTION", ignoreCase = true)) {
+                line
+            } else {
+                line
+                    .replace(Regex("\\s*\\([^)]*(@|kes|ksh|/=|\\bqty\\b|\\bpax\\b|\\bper\\s+plate\\b|\\bx\\d+|\\d+\\s*pcs)[^)]*\\)", RegexOption.IGNORE_CASE), "")
+                    .replace(Regex("\\s*[@-]\\s*(kes|ksh)?\\s*[0-9,]+(\\.[0-9]+)?(/=)?(\\s*per\\s*\\w+)?", RegexOption.IGNORE_CASE), "")
+                    .replace(Regex("\\s+\\b(qty|x)\\s*:?\\s*\\d+\\b", RegexOption.IGNORE_CASE), "")
+                    .trimEnd()
+            }
+        }
     }
 
     fun buildSenderContactText(form: LetterheadFormData): String {
@@ -144,7 +210,7 @@ object FormSync {
             ElementRole.CLIENT_NAME to "Client: ${form.clientName.ifEmpty { "—" }}",
             ElementRole.EVENT_VENUE to "Venue: ${form.venue.ifEmpty { "—" }}",
             ElementRole.EVENT_META to "Date: ${form.date.ifEmpty { "—" }}   |   PAX: ${form.pax.ifEmpty { "—" }}\nClient: ${form.clientName.ifEmpty { "—" }}\nVenue: ${form.venue.ifEmpty { "—" }}",
-            ElementRole.BODY to form.eventDetails,
+            ElementRole.BODY to formatMenuForDocument(form.eventDetails, form.showMenuQuantityAndPrice),
             ElementRole.COST_SUMMARY to buildPaymentSummaryText(form),
             ElementRole.CLOSING to form.paymentInstructions,
             ElementRole.PAYMENT_BANK to form.bankDetails,

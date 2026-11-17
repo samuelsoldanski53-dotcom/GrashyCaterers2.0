@@ -1,5 +1,6 @@
 package com.example.export
 
+import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -10,7 +11,10 @@ import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.os.ParcelFileDescriptor
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.text.Layout
 import android.text.StaticLayout
@@ -49,8 +53,45 @@ object DocumentExporter {
     data class ExportFileResult(
         val uri: Uri,
         val fileName: String,
-        val mimeType: String
+        val mimeType: String,
+        val savedFolderLabel: String = "Downloads/GrashyStudio"
     )
+
+    private fun copyToPublicDownloads(
+        context: Context,
+        sourceFile: File,
+        fileName: String,
+        mimeType: String
+    ): String {
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val resolver = context.contentResolver
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/GrashyStudio")
+                }
+                val targetUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                if (targetUri != null) {
+                    resolver.openOutputStream(targetUri)?.use { out ->
+                        sourceFile.inputStream().use { inp -> inp.copyTo(out) }
+                    }
+                    "Downloads/GrashyStudio/$fileName"
+                } else {
+                    "App Exports/$fileName"
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                val dir = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    "GrashyStudio"
+                ).apply { mkdirs() }
+                val dest = File(dir, fileName)
+                sourceFile.copyTo(dest, overwrite = true)
+                "Downloads/GrashyStudio/$fileName"
+            }
+        }.getOrDefault("App Exports/$fileName")
+    }
 
     sealed class ImportResult {
         data class LoadedProject(val project: LetterheadProject, val message: String) : ImportResult()
@@ -141,11 +182,49 @@ object DocumentExporter {
                 .filter { it.pageIndex == pageIdx && it.visible }
                 .sortedBy { it.zIndex }
 
+            // Measure BODY text overflow so menu items are never cut off
+            var bodyOverflowPx = 0f
+            val bodyEl = pageElements.find { it.role == ElementRole.BODY && it.type == ElementType.TEXT }
+            val bodyBottomY = bodyEl?.let { (it.y + it.height) * mmToPx } ?: Float.MAX_VALUE
+            if (bodyEl != null && bodyEl.textStyle != null && !bodyEl.content.isNullOrEmpty()) {
+                val ts = bodyEl.textStyle
+                val innerW = max(12, ((bodyEl.width - ts.paddingLeft - ts.paddingRight) * mmToPx).roundToInt())
+                val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    textSize = ts.fontSize * scale
+                    typeface = resolveAndroidTypeface(context, ts.fontFamily, ts.fontWeight, ts.fontStyle == "italic")
+                    letterSpacing = ts.letterSpacing
+                }
+                val safeText = bodyEl.content.replace(Regex("💫\\s*"), "• ")
+                val measured = StaticLayout.Builder.obtain(safeText, 0, safeText.length, tp, innerW)
+                    .setLineSpacing(0f, ts.lineHeight.coerceAtLeast(0.9f))
+                    .setIncludePad(false)
+                    .build()
+                val neededH = measured.height + (ts.paddingTop + ts.paddingBottom) * mmToPx + 6f
+                val boxH = bodyEl.height * mmToPx
+                if (neededH > boxH) {
+                    bodyOverflowPx = neededH - boxH
+                }
+            }
+
             for (el in pageElements) {
+                val shiftDownPx = if (
+                    bodyOverflowPx > 0f &&
+                    el.role != ElementRole.BODY &&
+                    el.role != ElementRole.FOOTER_WAVE &&
+                    (el.y * mmToPx) >= bodyBottomY - 4f
+                ) {
+                    bodyOverflowPx
+                } else {
+                    0f
+                }
                 val left = el.x * mmToPx
-                val top = el.y * mmToPx
+                val top = el.y * mmToPx + shiftDownPx
                 val width = el.width * mmToPx
-                val height = el.height * mmToPx
+                val height = if (el.role == ElementRole.BODY && bodyOverflowPx > 0f) {
+                    el.height * mmToPx + bodyOverflowPx
+                } else {
+                    el.height * mmToPx
+                }
                 val alphaInt = (el.opacity.coerceIn(0f, 1f) * 255).roundToInt()
 
                 canvas.save()
@@ -260,7 +339,8 @@ object DocumentExporter {
                                 .build()
 
                             canvas.save()
-                            canvas.clipRect(left, top, left + width, top + height)
+                            val clipBottom = max(top + height, top + padT + staticLayout.height + 6f)
+                            canvas.clipRect(left, top, left + width, clipBottom)
                             canvas.translate(left + padL, top + padT)
                             staticLayout.draw(canvas)
                             canvas.restore()
@@ -277,9 +357,10 @@ object DocumentExporter {
             val fileName = "${slugify(project.name)}.pdf"
             val outFile = File(exportsDir(context), fileName)
             FileOutputStream(outFile).use { pdf.writeTo(it) }
+            val savedLabel = copyToPublicDownloads(context, outFile, fileName, "application/pdf")
 
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", outFile)
-            ExportFileResult(uri, fileName, "application/pdf")
+            ExportFileResult(uri, fileName, "application/pdf", savedLabel)
         } finally {
             runCatching { pdf.close() }
         }
@@ -344,6 +425,7 @@ object DocumentExporter {
                     <wp:inline distT="0" distB="0" distL="0" distR="0">
                       <wp:extent cx="$cx" cy="$cy"/>
                       <wp:docPr id="$docPrId" name="Image $docPrId"/>
+                      <wp:cNvGraphicFramePr/>
                       <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
                         <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
                           <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
@@ -648,7 +730,9 @@ object DocumentExporter {
             <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
             <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
                         xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-                        xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+                        xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+                        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+                        xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
               <w:body>
                 $bodyXml
                 <w:sectPr>
@@ -704,20 +788,19 @@ object DocumentExporter {
             }
         }
 
+        val mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        val savedLabel = copyToPublicDownloads(context, outFile, fileName, mimeType)
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", outFile)
-        ExportFileResult(
-            uri,
-            fileName,
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
+        ExportFileResult(uri, fileName, mimeType, savedLabel)
     }
 
     suspend fun exportProjectJson(context: Context, project: LetterheadProject): ExportFileResult = withContext(Dispatchers.IO) {
         val fileName = "${slugify(project.name)}.grashy.json"
         val outFile = File(exportsDir(context), fileName)
         outFile.writeText(json.encodeToString(project), Charsets.UTF_8)
+        val savedLabel = copyToPublicDownloads(context, outFile, fileName, "application/json")
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", outFile)
-        ExportFileResult(uri, fileName, "application/json")
+        ExportFileResult(uri, fileName, "application/json", savedLabel)
     }
 
     private fun resolveDisplayName(context: Context, uri: Uri): String {

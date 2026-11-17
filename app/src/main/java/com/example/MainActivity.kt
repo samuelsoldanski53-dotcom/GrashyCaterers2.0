@@ -1,5 +1,6 @@
 package com.example
 
+import android.app.DownloadManager
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -23,16 +24,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -95,6 +101,7 @@ fun GrashyStudioApp(viewModel: StudioViewModel = viewModel()) {
     var showLayersSheet by remember { mutableStateOf(false) }
     var showInspectorSheet by remember { mutableStateOf(false) }
     var replacingImageElementId by remember { mutableStateOf<String?>(null) }
+    var exportedFileReady by remember { mutableStateOf<DocumentExporter.ExportFileResult?>(null) }
 
     // Android Zero-Permission Photo Picker
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -133,18 +140,12 @@ fun GrashyStudioApp(viewModel: StudioViewModel = viewModel()) {
         }
     }
 
-    // Share / Open exported PDF, DOCX, or JSON
+    // Show Export Ready dialog (Open File / Open in Folder / Share)
     LaunchedEffect(Unit) {
         viewModel.shareEvents.collect { event ->
             when (event) {
                 is ShareEvent.ExportReady -> {
-                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = event.result.mimeType
-                        putExtra(Intent.EXTRA_STREAM, event.result.uri)
-                        putExtra(Intent.EXTRA_SUBJECT, event.result.fileName)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    context.startActivity(Intent.createChooser(shareIntent, "Share ${event.result.fileName}"))
+                    exportedFileReady = event.result
                 }
             }
         }
@@ -233,6 +234,7 @@ fun GrashyStudioApp(viewModel: StudioViewModel = viewModel()) {
                                     onStartNewClient = viewModel::startNewClient,
                                     onSwitchToVisual = { viewModel.setEditorMode(EditorMode.VISUAL) },
                                     onShowPreviewCompact = {},
+                                    onSavePermanentAddress = viewModel::savePermanentAddress,
                                     modifier = Modifier.width(if (isExpanded) 440.dp else 340.dp)
                                 )
                                 VerticalDivider(color = StudioColors.Border)
@@ -314,6 +316,7 @@ fun GrashyStudioApp(viewModel: StudioViewModel = viewModel()) {
                                     onStartNewClient = viewModel::startNewClient,
                                     onSwitchToVisual = { viewModel.setEditorMode(EditorMode.VISUAL) },
                                     onShowPreviewCompact = { viewModel.setCompactFormPreview(true) },
+                                    onSavePermanentAddress = viewModel::savePermanentAddress,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -516,6 +519,72 @@ fun GrashyStudioApp(viewModel: StudioViewModel = viewModel()) {
                 onApplyTemplate = viewModel::applyTemplate,
                 onSaveTemplate = viewModel::saveCurrentAsTemplate,
                 onLoadClient = viewModel::loadClientIntoForm
+            )
+        }
+
+        // Export Ready Dialog: Open File, Open in Folder, or Share
+        exportedFileReady?.let { result ->
+            AlertDialog(
+                onDismissRequest = { exportedFileReady = null },
+                title = { Text("Export Saved") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = result.fileName,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = StudioColors.TextPrimary
+                        )
+                        Text(
+                            text = "Saved to: ${result.savedFolderLabel}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = StudioColors.TextMuted
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            exportedFileReady = null
+                            val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(result.uri, result.mimeType)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            runCatching { context.startActivity(openIntent) }
+                                .onFailure { viewModel.showNotice("No app found to open ${result.fileName}.") }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = StudioColors.BrandAccent)
+                    ) {
+                        Text("Open File")
+                    }
+                },
+                dismissButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                exportedFileReady = null
+                                val folderIntent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
+                                runCatching { context.startActivity(folderIntent) }
+                                    .onFailure { viewModel.showNotice("Saved in ${result.savedFolderLabel}") }
+                            }
+                        ) {
+                            Text("Open in Folder")
+                        }
+                        TextButton(
+                            onClick = {
+                                exportedFileReady = null
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = result.mimeType
+                                    putExtra(Intent.EXTRA_STREAM, result.uri)
+                                    putExtra(Intent.EXTRA_SUBJECT, result.fileName)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share ${result.fileName}"))
+                            }
+                        ) {
+                            Text("Share")
+                        }
+                    }
+                }
             )
         }
     }
