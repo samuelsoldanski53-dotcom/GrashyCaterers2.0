@@ -12,8 +12,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-apk:
-    name: Assemble Debug APK
+  build-release-apk:
+    name: Assemble Signed Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -32,11 +32,60 @@ jobs:
           accept-android-sdk-licenses: true
           packages: platform-tools platforms;android-36 build-tools;36.0.0
 
-      - name: Verify Android SDK Root & Tools
+      - name: Configure Optional Environment Variables
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          sdkmanager --sdk_root="$ANDROID_HOME" --list_installed
+          if [ ! -f ".env" ]; then
+            cp .env.example .env || touch .env
+          fi
+
+      - name: Set up Gradle Cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant Execute Permission for Gradle Wrapper
+        run: chmod +x gradlew
+
+      - name: Build Signed Release APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify Release APK Signature
+        run: |
+          ls -lh app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload Grashy-Studio-Android-Release-APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Grashy-Studio-Android-Release-APK
+          path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+          if-no-files-found: error
+
+  build-debug-apk:
+    name: Assemble Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Set up Android SDK & Required Packages
+        uses: android-actions/setup-android@v4
+        with:
+          accept-android-sdk-licenses: true
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
 
       - name: Configure Optional Environment Variables
         run: |
@@ -65,7 +114,7 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
-      - name: Verify APK Output
+      - name: Verify Debug APK Output
         run: ls -lh app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload Grashy-Studio-Android-APK Artifact

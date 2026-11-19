@@ -1,4 +1,6 @@
+import java.util.Base64
 import java.util.Properties
+import org.gradle.api.GradleException
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -40,12 +42,55 @@ android {
         buildConfigField("String", "VITE_SUPABASE_ANON_KEY", "\"${loadEnvValue("VITE_SUPABASE_ANON_KEY")}\"")
     }
 
+    val releaseKeystoreBase64 = System.getenv("ANDROID_KEYSTORE_BASE64")?.trim().orEmpty()
+    val releaseStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD").orEmpty()
+    val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")?.trim().orEmpty()
+    val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD").orEmpty()
+    val hasReleaseSigningSecrets = releaseKeystoreBase64.isNotEmpty() &&
+        releaseStorePassword.isNotEmpty() &&
+        releaseKeyAlias.isNotEmpty() &&
+        releaseKeyPassword.isNotEmpty()
+
+    val isReleaseTaskRequested = gradle.startParameter.taskNames.any { task ->
+        task.contains("Release", ignoreCase = true)
+    }
+
+    if (isReleaseTaskRequested && !hasReleaseSigningSecrets) {
+        val missing = buildList {
+            if (releaseKeystoreBase64.isEmpty()) add("ANDROID_KEYSTORE_BASE64")
+            if (releaseStorePassword.isEmpty()) add("ANDROID_KEYSTORE_PASSWORD")
+            if (releaseKeyAlias.isEmpty()) add("ANDROID_KEY_ALIAS")
+            if (releaseKeyPassword.isEmpty()) add("ANDROID_KEY_PASSWORD")
+        }
+        throw GradleException(
+            "Release signing secrets are missing: ${missing.joinToString(", ")}. " +
+                "Configure them as environment variables or GitHub Actions secrets before running a release build."
+        )
+    }
+
+    val decodedReleaseKeystoreFile = if (hasReleaseSigningSecrets) {
+        layout.buildDirectory.file("signing/release-keystore.jks").get().asFile.apply {
+            parentFile?.mkdirs()
+            writeBytes(Base64.getMimeDecoder().decode(releaseKeystoreBase64))
+        }
+    } else {
+        null
+    }
+
     signingConfigs {
         create("debugConfig") {
             storeFile = file("${rootDir}/debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
+        }
+        if (hasReleaseSigningSecrets && decodedReleaseKeystoreFile != null) {
+            create("release") {
+                storeFile = decodedReleaseKeystoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
@@ -56,6 +101,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (hasReleaseSigningSecrets) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             signingConfig = signingConfigs.getByName("debugConfig")
